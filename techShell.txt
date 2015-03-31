@@ -1,0 +1,567 @@
+/* Miguel Garcia
+   SHELL
+   CSC 222*/
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+
+char *sets[20];
+char *setups[20];
+int numSets = -1;
+int tokenMaker(char *buffed, char** token)
+{
+	char *buffing;
+	int j =0;
+	int t=0;
+	
+	while ((buffing = strsep(&buffed, " \t"))!=NULL) 
+	{
+		if (buffing[0] == '|') 
+		{
+			t++;
+		}
+		
+		if(buffing[0]!='\0' && j<9) 
+		{
+
+			token[j] = buffing;
+			j++;
+		}
+	}
+	token[j]=NULL;
+	return t;
+}
+
+runCmd(char **token)
+{
+	pid_t pid;
+	int *child_status;
+	char cwd[1024];
+	char *first;
+	if (!strcmp(token[0], "exit"))
+	{
+		exit(0);
+	}
+	else if (!strcmp(token[0], "pwd")) 
+	{
+		if(getcwd(cwd, 1024) == NULL)
+		{	
+			perror("getcwd() error");
+		}
+		printf("%s \n", cwd);
+	}
+	else if (!strcmp(token[0], "cd")) 
+	{
+		first = token[1];
+		if (first[0] == '\0' || first[0] == '~') 
+		{
+			if(chdir(getenv("HOME")) != 0)
+			{
+				perror("chdir() error");
+			}
+		}
+		else 
+		{
+			if(chdir(first)!=0)
+			{
+				perror("Directory does not exist");
+			}
+		}
+	}
+	else if (!strcmp(token[0], "Set"))
+	{
+		if (token[1][0]== '$') 
+		{
+			if (token[2] != NULL) 
+			{
+				int already = -1;
+				int place = 0;
+				while (place <= numSets) 
+				{
+					if (!strcmp(sets[place],token[1])) 
+					{
+						setups[place] = token[2];
+						already = 2;
+					}
+					place++;
+				}
+					if (already < 0) 
+					{
+						numSets++;
+						sets[numSets] = token[1];
+						setups[numSets] = token[2];
+					}
+			}
+		}
+		else 
+		{
+			perror("Variable must start with $ and have a value");
+		}
+
+	}
+	else if (!strcmp(token[0], "List"))
+	{
+		int i = 0;
+		if (numSets >= 0) 
+		{
+			while (i <= numSets) 
+			{
+				printf("%s", sets[i]);
+				printf(": ");
+				printf("%s", setups[i]);
+				printf("\n");
+				i++;
+			}
+										//print out variables
+		}
+		
+	}
+	else 
+	{
+		pid = fork();
+		if (pid)
+		{
+			pid = wait(child_status);
+		}
+		else if(execvp(token[0], token)) 
+		{
+			perror("illegal command");
+		}
+	}
+}
+
+
+
+int checkRedirect(char **token)
+{
+	int redirect = 0;
+	int i = 0;
+	while (token[i] != NULL) 
+	{
+		if (token[i][0] == '>') 
+		{
+			redirect = 1;
+		}
+		if (token[i][0] == '<') 
+		{
+			redirect = 1;
+		}
+		i++;
+	}
+	
+	return redirect;
+}
+
+runRedirect(char **token)
+{
+	pid_t pid;
+	int *child_status;
+	int i = 0;
+	int redirout = 0;
+	int redirin = 0;
+	while (token[i] != NULL) 
+	{
+		if (token[i][0] == '>') 
+		{
+			redirout = i;
+		}
+		if (token[i][0] == '<') 
+		{
+			redirin = i;
+		}
+		i++;
+	}
+	if (redirout > 0 && redirin == 0) 
+	{
+		pid = fork();
+		if (pid)
+		{
+			pid = wait(child_status);
+		}
+		else
+		{
+			char buf[100];
+			snprintf(buf, 100, "%s", token[redirout+1]);
+			int fp = open (buf, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+			dup2(fp, 1);
+			token[redirout]=NULL;
+			if (execvp(token[0], token)) 
+			{
+				perror("illegal command");
+			}
+			close(fp);
+		}
+	}
+	if (redirout == 0 && redirin > 0) 
+	{
+		pid = fork();
+		if (pid)
+		{
+			pid = wait(child_status);
+			int z;
+			for (z = 0; z < 1000; z++) 
+			{
+				z=z;
+			}
+		}
+		else
+		{
+			char buf[100];
+			snprintf(buf, 100, "%s", token[redirin+1]);
+			int fp = open (buf, O_RDONLY, 0);
+			dup2(fp, 0);
+			token[redirin]=NULL;
+			if (execvp(token[0], token)) 
+			{
+				perror("illegal command");
+			}
+			close(fp);
+		}
+	}
+	if (redirout > 0 && redirin > 0) 
+	{
+		pid = fork();
+		if (pid)
+		{
+			pid = wait(child_status);
+		}
+		else
+		{
+		char buf[100];
+		snprintf(buf, 100, "%s", token[redirin+1]);
+		int fps = open (buf, O_RDONLY, 0);
+		dup2(fps, 0);
+		token[redirin]=NULL;
+		
+		char bufs[100];
+		snprintf(bufs, 100, "%s", token[redirout+1]);
+		int fp = open (bufs, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+		dup2(fp, 1);
+		token[redirout]=NULL;
+		if (execvp(token[0], token)) 
+		{
+			perror("illegal command");
+		}
+		close(fp);
+		close(fps);
+		}
+	}
+}
+
+runCmd2(char **token)
+{
+	char cwd[1024];
+	char *first;
+	if (!strcmp(token[0], "exit"))
+	{
+		exit(0);
+	}
+	else if (!strcmp(token[0], "pwd")) 
+	{
+		if(getcwd(cwd, 1024) == NULL)
+		{	
+			perror("getcwd() error");
+		}
+		printf("%s \n", cwd);
+	}
+	else if (!strcmp(token[0], "cd")) 
+	{
+		first = token[1];
+		if (first[0] == '\0' || first[0] == '~') 
+		{
+			if(chdir(getenv("HOME")) != 0)
+			{
+				perror("chdir() error");
+			}
+		}
+		else 
+		{
+			if(chdir(first)!=0)
+			{
+				perror("Directory does not exist");
+			}
+		}
+	}
+	else if (!strcmp(token[0], "Set"))
+	{
+		if (token[1][0]== '$') 
+		{
+			if (token[2] != NULL) 
+			{
+				int already = -1;
+				int place = 0;
+				while (place <= numSets) 
+				{
+					if (!strcmp(sets[place],token[1])) 
+					{
+						setups[place] = token[2];
+						already = 2;
+					}
+					place++;
+				}
+				if (already < 0) 
+				{
+					numSets++;
+					sets[numSets] = token[1];
+					setups[numSets] = token[2];
+				}
+			}
+		}
+		else 
+		{
+			perror("Variable must start with $ and have a value");
+		}
+		
+	}
+	else if (!strcmp(token[0], "List"))
+	{
+		int i = 0;
+		if (numSets >= 0) 
+		{
+			while (i <= numSets) 
+			{
+				printf("%s", sets[i]);
+				printf(": ");
+				printf("%s", setups[i]);
+				printf("\n");
+				i++;
+			}
+			//print out variables
+		}
+		
+	}
+	else 
+	{
+		if(execvp(token[0], token)) 
+		{
+			perror("illegal command");
+		}
+	}
+}
+
+runRedirect2(char **token)
+{
+	int i = 0;
+	int redirout = 0;
+	int redirin = 0;
+	while (token[i] != NULL) 
+	{
+		if (token[i][0] == '>') 
+		{
+			redirout = i;
+		}
+		if (token[i][0] == '<') 
+		{
+			redirin = i;
+		}
+		i++;
+	}
+	if (redirout > 0 && redirin == 0) 
+	{
+
+		{
+			char buf[100];
+			snprintf(buf, 100, "%s", token[redirout+1]);
+			int fp = open (buf, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+			dup2(fp, 1);
+			token[redirout]=NULL;
+			if (execvp(token[0], token)) 
+			{
+				perror("illegal command");
+			}
+			close(fp);
+		}
+	}
+	if (redirout == 0 && redirin > 0) 
+	{
+			char buf[100];
+			snprintf(buf, 100, "%s", token[redirin+1]);
+			int fp = open (buf, O_RDONLY, 0);
+			dup2(fp, 0);
+			token[redirin]=NULL;
+			if (execvp(token[0], token)) 
+			{
+				perror("illegal command");
+			}
+			close(fp);
+	}
+	if (redirout > 0 && redirin > 0) 
+	{
+		char buf[100];
+		snprintf(buf, 100, "%s", token[redirin+1]);
+		int fps = open (buf, O_RDONLY, 0);
+		dup2(fps, 0);
+		token[redirin]=NULL;
+		
+		char bufs[100];
+		snprintf(bufs, 100, "%s", token[redirout+1]);
+		int fp = open (bufs, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+		dup2(fp, 1);
+		token[redirout]=NULL;
+		if (execvp(token[0], token)) 
+		{
+			perror("illegal command");
+		}
+		close(fp);
+		close(fps);
+		
+	}
+	
+	
+}
+
+nextCmd (char **arg, char **cmd1, char **cmd2)
+{
+	int c = 1;
+	int i = 0;
+	while (arg[i][0] != '|') 
+	{
+		cmd1[i] = arg[i]; 
+		i++;
+	}
+	cmd1[i] = NULL; 
+	i++;
+	int j = 0;
+	while (arg[i] != NULL) 
+	{
+		cmd2[j] = arg[i];
+		i++;
+		j++;
+	}
+	cmd2[j] = NULL;
+	
+}
+
+runPipes(char **token, int t)
+{
+	pid_t pid;
+	int *child_status;
+	int in, fd [2];
+	in = 0;
+	char *cmd1[10];
+	char *cmd2[10];
+	nextCmd( token, cmd1, cmd2);
+	//t = #of pipes and t+1 = # of commands
+	int i;
+	int m = t;
+	for (i = 0; i< m; i++) 
+	{
+		pipe (fd);
+		if((pid = fork()) ==0)
+		{
+			if (in != 0) 
+			{
+				dup2(in,0);
+				close (in);
+			}
+			if (fd [1] != 1) 
+			{
+				dup2 (fd [1], 1);
+				close (fd [1]);
+			}
+			int redirect = 0;
+			redirect = checkRedirect(cmd1);
+			if(redirect > 0)
+			{
+				runRedirect2(cmd1);
+				redirect =0;
+			}
+			else
+			{
+				runCmd2(cmd1);
+			}
+		}
+		else 
+		{
+			wait(child_status);
+		}
+
+		close (fd [1]);
+		in = fd [0];
+		if (i < m-1) 
+		{
+			nextCmd(cmd2, cmd1, cmd2);
+		}
+	}
+	if ((pid = fork ()) ==0) 
+	{
+		if (in!= 0) 
+			dup2 (in, 0);
+	
+		int redirects = 0;
+		redirects = checkRedirect(cmd2);
+		if(redirects > 0)
+		{
+			runRedirect2(cmd2);
+			redirects =0;
+		}
+		else
+		{
+			runCmd2(cmd2);
+		}
+	}
+	else 
+	{
+		wait(child_status);
+	}
+
+}
+
+
+int main () 
+{	
+	pid_t pid;
+	int *child_status;
+	char buffer[101];
+	char *token[10];
+	char *buffed;
+	char cwd[1024];
+	int t = 0;
+	int redirect = 0;
+	int redirin = 0;
+	int redirout = 0;
+	
+	while(1)
+	{
+		char input[100];
+		if(getcwd(cwd, 1024) == NULL)
+		{
+			perror("getcwd() error");
+		}
+		printf("%s >", cwd);
+		scanf("%[^\n]s", input);
+		strcpy(buffer, input);
+		buffed = strdup(buffer);
+		t = tokenMaker(buffed, token);
+		
+		if (token[0][0]!='\0') 
+		{
+			if (t > 0) 
+			{
+				runPipes(token, t);
+				t = 0;
+			}
+			else 
+			{
+				redirect = checkRedirect(token);
+				if(redirect > 0)
+				{
+					runRedirect(token);
+					redirect =0;
+				}
+				else
+				{
+					runCmd(token);
+				}
+			}
+			
+		}
+		while (getchar() != '\n');
+	}
+	return 0;
+}
